@@ -1,0 +1,8 @@
+.env
+Rakefile
+target/
+data/
+images/
+events/
+src/
+Cargo.*

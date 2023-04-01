@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Nostr Decentralised XKCD">
+  <meta name="author" content="">
+  <title>Nostr Decentralised XKCD</title>
+
+  <meta property="og:title" content="Nostr Decentralised XKCD">
+  <meta name="twitter:title" content="Nostr Decentralised XKCD">
+
+  <meta property="og:description" content="Nostr Decentralised XKCD">
+  <meta name="twitter:description" content="Nostr Decentralised XKCD">
+
+  <!-- <meta property="og:image" content=""> -->
+  <!-- <meta name="twitter:image" content=""> -->
+
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.10.3/font/bootstrap-icons.min.css" integrity="sha512-YFENbnqHbCRmJt5d+9lHimyEMt8LKSNTMLSaHjvsclnZGICeY/0KYEeiHwD1Ux4Tcao0h60tdcMv+0GljvWyHg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+  <style>
+    .loader {
+        position: fixed;
+        left: 0px;
+        top: 0px;
+        width: 100%;
+        height: 100%;
+        z-index: 9999;
+        background: url('https://1.bp.blogspot.com/-zhzC1anB3Xc/Vn6esurhQ7I/AAAAAAAANV0/8jyE4KkzSsE/s1600/496.GIF') 50% 50% no-repeat rgb(249,249,249);
+    }
+    main .container {
+      margin-top: 1em;
+      margin-bottom: 2em;
+    }
+    main #content img {
+      display: block;
+      height: 312px;
+      max-width: 600px;
+      max-height: 420px;
+      width: auto;
+      height: auto;
+    }
+  </style>
+
+</head>
+<body>
+
+<main>
+  <div class="loader"></div>
+
+  <div class="container">
+    <div class="row justify-content-md-center">
+      <div id="content" class="col-md-6 overflow-x-hidden text-break">
+
+        <div class="card text-center">
+          <h5 id="titleText" class="card-title my-3"></h5>
+          <img id="comicImage" src="" class="card-img-top mx-auto d-block" alt="">
+
+          <hr/>
+
+          <div class="card-body">
+            <pre id="altText" class="card-text text-wrap"></pre>
+          </div>
+
+          <div class="card-body">
+            <a id="prevLink" href="#" class="btn btn-link card-link">< Previous</a>
+            <a id="randLink" href="#" class="btn btn-link card-link">~ Random ~</a>
+            <a id="nextLink" href="#" class="btn btn-link card-link">Next ></a>
+          </div>
+
+          <div class="card-footer text-muted">
+            Nostr Decentralised XKCD - Source: <a href="https://xkcd.com">https://xkcd.com</a>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.3/jquery.min.js" integrity="sha512-STof4xm1wgkfm7heWqFJVn58Hm3EtS31XFaagaa8VMReCXAkQnJZ+jEy8PCC/iT18dFy95WcExNHFTqLyp72eQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+<script type="text/javascript">
+
+// TODO: Check cache first for match (basically cache events)
+// TODO: Review how we pick relays
+// TODO: Review using a persistent WS connection approach
+
+// TODO: Load max_id from latest comic, or fallback to 2757
+// https://xkcd.com/info.0.json
+
+max_id = 10;
+loaded_event = null;
+// Hard code this to prevent weird events showing from other people
+author_pubkey = "e918338bdafa494232f486f526e1ab3b150b6e62d2827b8493c899b278cb78bd";
+
+
+jQuery.fn.visible = function() {
+    return this.css('visibility', 'visible');
+};
+
+jQuery.fn.invisible = function() {
+    return this.css('visibility', 'hidden');
+};
+
+function getRandomArbitrary(min, max) {
+  return Math.floor(Math.random() * (max - min + 1) + min)
+}
+
+function getFirstTagByName(event, tagName) {
+  const tags = event.tags;
+  for (let i = 0; i < tags.length; i++) {
+    if (tags[i][0] === tagName) {
+      return tags[i][1];
+    }
+  }
+  return null;
+}
+
+function loadComic() {
+  let location_hash = window.location.hash.substr(1)
+
+  // Default to latest (known) comic
+  var id = (location_hash.length > 0) ? parseInt(location_hash) : max_id;
+  var id_hash = '#'+id;
+
+  // Update the URL to include the id hash
+  if (window.location.hash != id_hash) {
+    if (history.pushState) {
+      history.pushState(null, null, id_hash);
+    } else {
+      window.location.hash = id_hash;
+    }
+  }
+
+  rand_href_id = getRandomArbitrary(1, max_id);
+  $("#randLink").attr("href", '#' + rand_href_id);
+
+  let relay = "wss://relay.damus.io"; //wss://nos.lol
+  try {
+    let socket = new WebSocket(relay);
+
+    socket.onopen = function(e) {
+      console.log("[open] Connection established with " + relay);
+
+      // TODO: Maybe add author_pubkey as a filter too
+      event_request = '["REQ", "XKCD", {"authors": ["'+author_pubkey+'"], "kinds": [30078], "#d": ["xkcd:'+id+'"], "limit": 1}]';
+      socket.send(event_request);
+    }
+
+    socket.onmessage = function(msg) {
+      console.log('[message] Data received from server: }' + msg.data);
+
+      response = JSON.parse(msg.data);
+
+      // TODO: Comic 404 is special and is a 404 error page - handle special case
+
+      if (response[0] == 'EVENT') {
+
+        loaded_event = response[2];
+        event_content = JSON.parse(loaded_event.content);
+
+        document.title = event_content.title;
+        $('#titleText').text(event_content.title);
+
+        $("#comicImage").attr("src", event_content.img);
+        $("#comicImage").attr("alt", event_content.alt);
+
+        $('#altText').text(event_content.alt);
+
+        prev_href_id = (id > 1) ? id-1 : 0;
+        $("#prevLink").attr("href", '#' + prev_href_id);
+        if (prev_href_id > 0) { $("#prevLink").visible() } else { $("#prevLink").invisible() }
+
+        next_href_id = (id < max_id) ? id+1 : max_id;
+        $("#nextLink").attr("href", '#' + next_href_id);
+        if (next_href_id <= max_id && next_href_id != id) { $("#nextLink").visible() } else { $("#nextLink").invisible() }
+
+        $(".loader").hide();
+
+        // close_request = '["CLOSE", "XKCD"]';
+        // socket.send(close_request);
+
+        socket.close();
+
+      } else if (response[0] == 'EOSE') {
+        if (!loaded_event || getFirstTagByName(loaded_event, 'd') != 'xkcd:'+id) {
+          $('#titleText').text('404: Comic not found');
+          $("#comicImage").removeAttr("src");
+          $("#comicImage").removeAttr("alt");
+
+          $("#prevLink").invisible();
+          $("#nextLink").invisible();
+
+          socket.close();
+
+          $(".loader").hide();
+        }
+      }
+    }
+  } catch {
+    $('#titleText').text('Websocket Connection Error');
+    $("#comicImage").removeAttr("src");
+    $("#comicImage").removeAttr("alt");
+  }
+}
+
+$(window).on('load', function() {
+  loadComic();
+});
+
+$(window).on('hashchange', function() {
+  loadComic();
+});
+
+</script>
+
+</body>
+</html>
